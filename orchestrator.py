@@ -1,4 +1,3 @@
-import requests
 import io
 import asyncio
 import uuid
@@ -6,16 +5,14 @@ import sys
 from aiohttp import ClientSession
 from random import shuffle, random
 
-from PIL import Image
+import requests
 import discord, openai
-from tarotdeck import TarotDeck
+from discord.ext import commands
+from PIL import Image
 
+from tarotHandler import TarotHandler
 from prompts import prompts
 
-
-MAX_CARDS = 3
-DECKS = ('jodocamoin', 'riderwaitesmith', 'crowleythoth')
-DECK = 'jodocamoin'
 lock = asyncio.Lock()
 
 class BotBot(discord.Client):
@@ -26,6 +23,7 @@ class BotBot(discord.Client):
         self.pres_penalty = 0.7
         self.log_channel = log_channel
         self.top_p = 1
+        self.tarotHandler = TarotHandler()
         super().__init__(intents=intents)
 
 
@@ -50,7 +48,7 @@ class BotBot(discord.Client):
         channel = bot.get_channel(self.log_channel)
         await channel.send(text)
 
-    async def send_message(self, message, text, command):
+    async def send_message(self, message, text, command, files=None):
         if command == '$python':
             text = '```python\n' + text + '\n```'
 
@@ -65,7 +63,7 @@ class BotBot(discord.Client):
 
             text = (text[:1997] + '..') if len(text) > 1999 else text
             try:
-                await message.channel.send(text, reference=message)
+                await message.channel.send(text, reference=message, files=files)
             except discord.errors.HTTPException as e:
                 await message.channel.send(e)
                 ltext = len(text)
@@ -110,37 +108,22 @@ class BotBot(discord.Client):
             self.temp = old_temp
             self.top_p = old_top_p
 
-        if command_args[0] == '$setdeck':
-            try:
-                if command_args[1] in DECKS:
-                    global DECK
-                    await self.send_message(message, ("Deck set to {}".format(command_args[1])), command_args[0])
-                    DECK = command_args[1]
-                else:
-                    await self.send_message(message, "Deck type must be one of {}".format(DECKS), command_args[0])
-            except (IndexError):
-                pass
 
         if command_args[0] == '$draw':
-            deck = TarotDeck(DECK)
-            shuffle(deck)
             try:
                 num_cards = int(command_args[1])
-            except (ValueError, IndexError):
-                num_cards = 1  # Default to 1 card if the argument is not a valid integer
+            except:
+                num_cards = 1
 
-            if num_cards > MAX_CARDS:
-                await self.send_message(message, "I will draw a max of {} cards.".format(MAX_CARDS), command_args[0])
-            else:
-                for c in range(num_cards):
-                    card = deck.pop()
-                    if 'majors' not in card.image:
-                        caption = card.rank + ' of ' + card.kind
-                    else:
-                        caption = card.rank + ': ' + card.kind
+            try:
+                deck = command_args[2]
+            except:
+                deck = 'jodocamoin'
 
-                    await self.send_message(message, caption, command_args[0])
-                    await message.channel.send(file=discord.File(card.image))
+            response_text, images = self.tarotHandler.draw(num_cards, deck)
+            response_text = '\n'.join(response_text)
+            files = [discord.File(card_image) for card_image in images]
+            await self.send_message(message, response_text, command_args[0], files)
 
         if command_args[0] == '$comp':
             response = await self.send_OpenAI_completion_request(prompt)
