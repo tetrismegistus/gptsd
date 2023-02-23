@@ -65,11 +65,8 @@ class BotBot(discord.Client):
             try:
                 await message.channel.send(text, reference=message, files=files)
             except discord.errors.HTTPException as e:
-                await message.channel.send(e)
-                ltext = len(text)
-                ttext = type(text)
-                await message.channel.send(f'len of text object {ltext}, with a type of {ttext}', reference=message)
-
+                await message.channel.send(f"***Recieved no text in response***")
+                await self.send_log_message(e)
 
     async def execute_command(self, message):
         command_args = message.content.split()
@@ -136,14 +133,17 @@ class BotBot(discord.Client):
         if command_args[0] == '$img':
 
             response = await self.send_OpenAI_image_request(prompt)
-            image_url = response['data'][0]['url']
+            if isinstance(response, str):
+                await message.channel.send(response, reference=message)
+            else:
+                image_url = response['data'][0]['url']
 
-            img = requests.get(image_url)
+                img = requests.get(image_url)
 
-            if img.status_code == 200:
-                image_data = io.BytesIO(img.content)
-                image_file = discord.File(image_data, filename="temp.png")
-                await message.channel.send(file=image_file, reference=message)
+                if img.status_code == 200:
+                    image_data = io.BytesIO(img.content)
+                    image_file = discord.File(image_data, filename="temp.png")
+                    await message.channel.send(file=image_file, reference=message)
 
         if command_args[0] == '$edit':
             baseimg = requests.get(message.attachments[0].url)
@@ -177,18 +177,23 @@ class BotBot(discord.Client):
                                             frequency_penalty=self.freq_penalty,
                                             presence_penalty=self.pres_penalty,)
             returnval = response['choices'][0]['text']
-        except openai.error.InvalidRequestError as e:
-            returnval = e
+        except (openai.error.InvalidRequestError, openai.error.APIError) as e:
+            returnval = f'***{e}***'
+            await self.send_log_message(e)
         return returnval
 
 
 
     async def send_OpenAI_image_request(self, prompt):
-        response = openai.Image.create(
-            prompt=prompt,
-            n=1,
-            size="1024x1024"
-        )
+        try:
+            response = openai.Image.create(
+                prompt=prompt,
+                n=1,
+                size="1024x1024"
+            )
+        except (openai.error.InvalidRequestError, openai.error.APIError) as e:
+            await self.send_log_message(e)
+            response = f'***{e}***'
         return response
 
 
