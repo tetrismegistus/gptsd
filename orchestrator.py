@@ -13,7 +13,45 @@ from PIL import Image
 from tarotHandler import TarotHandler
 from prompts import prompts
 
-lock = asyncio.Lock()
+import asyncio
+
+class AsyncSafeList:
+    def __init__(self):
+        self._list = []
+        self._lock = asyncio.Lock()
+        self._index = 0
+
+    def __aiter__(self):
+        self._index = 0
+        return self
+
+    async def __anext__(self):
+        async with self._lock:
+            if self._index < len(self._list):
+                item = self._list[self._index]
+                self._index += 1
+                return item
+            else:
+                raise StopAsyncIteration
+
+    async def append(self, item):
+        async with self._lock:
+            self._list.append(item)
+            if len(self._list) > 6:
+                self._list.pop(0)
+
+    async def remove(self, item):
+        async with self._lock:
+            self._list.remove(item)
+
+    async def get(self, index):
+        async with self._lock:
+            return self._list[index]
+
+    async def __len__(self):
+        async with self._lock:
+            return len(self._list)
+
 
 class BotBot(discord.Client):
     def __init__(self, intents, log_channel):
@@ -24,6 +62,7 @@ class BotBot(discord.Client):
         self.log_channel = log_channel
         self.top_p = 1
         self.tarotHandler = TarotHandler()
+        self.gpt_history = AsyncSafeList()
         super().__init__(intents=intents)
 
 
@@ -165,6 +204,32 @@ class BotBot(discord.Client):
                 image_file = discord.File(image_data, filename="temp.png")
                 await message.channel.send(file=image_file)
 
+        if command_args[0] == '$gpt':
+            await self.gpt_history.append({"role": "user", "content": prompt})
+            response = await self.send_ChatGPT_request(prompt)
+            await self.gpt_history.append({"role": "assistant", "content": response})
+            text = (response[:1997] + '..') if len(response) > 1999 else response
+            try:
+                await message.channel.send(text, reference=message)
+            except discord.errors.HTTPException as e:
+                await message.channel.send(f"***Recieved no text in response***")
+                await self.send_log_message(e)
+
+    async def send_ChatGPT_request(self, prompt):
+        model = "gpt-3.5-turbo"
+        mess = [{"role": "system", "content": "You are a helpful assistant. You respond in great depth."}]
+        async for m in self.gpt_history:
+            mess.append(m)
+        try:
+            response = openai.ChatCompletion.create(model=model,
+                                                    messages=mess,
+                                                    temperature=0,
+                                                    )
+            returnval = response['choices'][0]['message']['content']
+        except (openai.error.InvalidRequestError, openai.error.APIError) as e:
+            returnval = f'***{e}***'
+            await self.send_log_message(e)
+        return returnval
 
     async def send_OpenAI_completion_request(self, prompt):
         returnval = None
