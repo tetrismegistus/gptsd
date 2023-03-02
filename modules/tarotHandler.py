@@ -1,6 +1,6 @@
 from random import shuffle
 
-from tarotdeck import TarotDeck
+from modules.tarotdeck import TarotDeck
 
 class TarotHandler:
     def __init__(self):
