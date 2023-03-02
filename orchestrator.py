@@ -1,12 +1,10 @@
 import io
 import sys
-from aiohttp import ClientSession
 from random import shuffle, random
 
 import requests
 import discord, openai
 from discord.ext import commands
-from PIL import Image
 
 from modules.tarotHandler import TarotHandler
 from modules.helpers import AsyncSafeList
