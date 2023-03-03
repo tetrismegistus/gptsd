@@ -17,6 +17,11 @@ class BotBot(commands.Bot):
         super().__init__(command_prefix='/', intents=intents)
         self.gpt_history = AsyncSafeList()
         self.add_commands()
+        self.model = "text-davinci-003"
+        self.compTemp = .7
+        self.top_p = 1
+        self.freq_penalty = 0
+        self.pres_penalty = 0
 
     async def on_ready(self):
         await self.send_log_message(f'We have logged in as {self.user}')
@@ -91,6 +96,37 @@ class BotBot(commands.Bot):
             response = await ctx.bot.send_OpenAI_image_request(prompt)
             await ctx.bot.send_img_response(response, ctx.message)
 
+        @self.command(name='comp', pass_context=True, help='Sends text to gpt3 for completion')
+        async def comp(ctx):
+            prompt = ctx.message.content[len(ctx.prefix)+len(ctx.invoked_with):].strip()
+            response = await ctx.bot.send_OpenAI_completion_request(prompt)
+            text = (response[:1997] + '..') if len(response) > 1999 else response
+            try:
+                await ctx.channel.send(text, reference=ctx.message)
+            except discord.errors.HTTPException as e:
+                await ctx.channel.send(f"***Recieved no text in response***")
+                await ctx.bot.send_log_message(e)
+
+        @self.command(name='compSettings', pass_context=True, help='Changes/lists current settings for completion endpoint.  Calling with no arguments resets to default values.')
+        async def compSettings(ctx, model: str = commands.parameter(default="text-davinci-003",
+                                                                    description="the model the completion endpoint is using"),
+                               temperature: float = commands.parameter(default=0.7,
+                                                                       description="the temperature being sent to completion endpoint"),
+                               top_p: float = commands.parameter(default=1,
+                                                                 description="the top_p being sent to the completion endpoint"),
+                               fp: float = commands.parameter(default=0,
+                                                              description="the frequency penalty being sent to the completion endpoint"),
+                               pp: float = commands.parameter(default=0,
+                                                              description="the presence penalty being sent to the completion endpoint")):
+            ctx.bot.model = model
+            ctx.bot.compTemp = temperature
+            ctx.bot.top_p = top_p
+            ctx.bot.freq_penalty = fp
+            ctx.bot.pres_penalty = pp
+
+            settings_string = "model: {}\ntemperature: {}\n top_p: {}\n frequency penalty: {}\n presence penalty {}".format(self.model, self.compTemp, self.top_p, self.freq_penalty, self.pres_penalty)
+            await ctx.channel.send(settings_string, reference=ctx.message)
+
     async def send_ChatGPT_request(self, prompt):
         model = "gpt-3.5-turbo"
         mess = [{"role": "system", "content": "You are a helpful assistant. You respond in great depth."}]
@@ -118,6 +154,23 @@ class BotBot(commands.Bot):
             await self.send_log_message(e)
             response = f'***{e}***'
         return response
+
+    async def send_OpenAI_completion_request(self, prompt):
+        settings_string = "model: {}\ntemperature: {}\n top_p: {}\n frequency penalty: {}\n presence penalty {}".format(self.model, self.compTemp, self.top_p, self.freq_penalty, self.pres_penalty)
+        await self.send_log_message("Sending completion request {} with the following settings\n{}".format(prompt, settings_string))
+        returnval = None
+        try:
+            response = openai.Completion.create(model=self.model,
+                                     prompt=prompt,
+                                     temperature=self.compTemp,
+                                     top_p=self.top_p,
+                                     frequency_penalty=self.freq_penalty,
+                                     presence_penalty=self.pres_penalty,
+                                     max_tokens=256,)
+            returnval = response['choices'][0]['text']
+        except (openai.error.InvalidRequestError, openai.error.APIError) as e:
+            await self.send_log_message(e)
+        return returnval
 
 
 if __name__ == '__main__':
