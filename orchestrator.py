@@ -1,10 +1,13 @@
 import io
 import sys
 from random import shuffle, random
+import asyncio
 
 import requests
 import discord, openai
 from discord.ext import commands
+from discord import app_commands
+
 
 from modules.tarotHandler import TarotHandler
 from modules.helpers import AsyncSafeList
@@ -30,7 +33,7 @@ class BotBot(commands.Bot):
         channel = bot.get_channel(self.log_channel)
         await channel.send(text)
 
-    async def send_img_response(self, response, message):
+    async def send_img_response(self, response, message, text=None):
         if isinstance(response, str):
             await message.channel.send(response, reference=message)
         else:
@@ -39,7 +42,26 @@ class BotBot(commands.Bot):
             if img.status_code == 200:
                 image_data = io.BytesIO(img.content)
                 image_file = discord.File(image_data, filename="temp.png")
-                await message.channel.send(file=image_file, reference=message)
+                if text:
+                    await message.channel.send(text, file=image_file, reference=message)
+                else:
+                    await message.channel.send(text, file=image_file, reference=message)
+
+    async def on_reaction_add(self, reaction, user):
+        message = reaction.message
+        if message.author.bot and message.attachments:
+            galleryID = 1054031330624671784
+            channel = self.get_channel(galleryID)
+
+            referenced_message = await message.channel.fetch_message(message.reference.message_id)
+            file = await message.attachments[0].to_file()
+            await channel.send(referenced_message.author.name + ": " + referenced_message.content, file=file)
+
+    async def on_message(self, message):
+        if '(╯°□°)╯︵ ┻━┻' in message.content:
+            await message.channel.send('┬─┬ノ(ಠ_ಠノ)', reference=message)
+        await self.process_commands(message)
+
 
 
     def add_commands(self):
@@ -55,6 +77,15 @@ class BotBot(commands.Bot):
             except discord.errors.HTTPException as e:
                 await ctx.channel.send(f"***Recieved no text in response***")
                 await ctx.bot.send_log_message(e)
+
+        @self.command(name='imagine', pass_context=True, help='Creates a prompt and sends it to dalle')
+        async def imagine(ctx):
+            prompt = "Write a Dall-E prompt so that it creates a " + ctx.message.content[len(ctx.prefix)+len(ctx.invoked_with):].strip()
+            await ctx.bot.gpt_history.append({"role": "user", "content": prompt})
+            presponse = await ctx.bot.send_ChatGPT_request(prompt)
+            await ctx.bot.gpt_history.append({"role": "assistant", "content": presponse})
+            response = ctx.bot.send_OpenAI_image_request(presponse)
+            await ctx.bot.send_img_response(response, ctx.message, presponse)
 
         @self.command(name='draw', pass_context=True, help="Draws tarot cards.")
         async def draw(ctx,
@@ -133,26 +164,32 @@ class BotBot(commands.Bot):
         async for m in self.gpt_history:
             mess.append(m)
         try:
-            response = openai.ChatCompletion.create(model=model,
+            response = await asyncio.wait_for(openai.ChatCompletion.acreate(model=model,
                                                     messages=mess,
                                                     temperature=0,
-                                                    )
+                                                    ), timeout=10)
             returnval = response['choices'][0]['message']['content']
         except (openai.error.InvalidRequestError, openai.error.APIError) as e:
             returnval = f'***{e}***'
             await self.send_log_message(e)
+        except asyncio.TimeoutError:
+            returnval = f'***API call timed out***'
+            await self.send_log_message(returnval)
         return returnval
 
     async def send_OpenAI_image_request(self, prompt):
         try:
-            response = openai.Image.create(
+            response = await asyncio.wait_for(openai.Image.acreate(
                 prompt=prompt,
                 n=1,
                 size="1024x1024"
-            )
+            ), timeout=10)
         except (openai.error.InvalidRequestError, openai.error.APIError) as e:
             await self.send_log_message(e)
             response = f'***{e}***'
+        except asyncio.TimeoutError:
+            returnval = f'***API call timed out***'
+            await self.send_log_message(returnval)
         return response
 
     async def send_OpenAI_completion_request(self, prompt):
@@ -160,16 +197,19 @@ class BotBot(commands.Bot):
         await self.send_log_message("Sending completion request {} with the following settings\n{}".format(prompt, settings_string))
         returnval = None
         try:
-            response = openai.Completion.create(model=self.model,
+            response = await asyncio.wait_for(openai.Completion.acreate(model=self.model,
                                      prompt=prompt,
                                      temperature=self.compTemp,
                                      top_p=self.top_p,
                                      frequency_penalty=self.freq_penalty,
                                      presence_penalty=self.pres_penalty,
-                                     max_tokens=256,)
+                                     max_tokens=256,), timeout=10)
             returnval = response['choices'][0]['text']
         except (openai.error.InvalidRequestError, openai.error.APIError) as e:
             await self.send_log_message(e)
+        except asyncio.TimeoutError:
+            returnval = f'***API call timed out***'
+            await self.send_log_message(returnval)
         return returnval
 
 
