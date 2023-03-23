@@ -4,10 +4,8 @@ from random import shuffle, random
 import asyncio
 
 import requests
-import discord, openai
+import discord, openai, interactions
 from discord.ext import commands
-from discord import app_commands
-
 
 from modules.tarotHandler import TarotHandler
 from modules.helpers import AsyncSafeList
@@ -43,9 +41,11 @@ class BotBot(commands.Bot):
                 image_data = io.BytesIO(img.content)
                 image_file = discord.File(image_data, filename="temp.png")
                 if text:
-                    await message.channel.send(text, file=image_file, reference=message)
+                    await message.channel.send(text, file=image_file,
+                                               reference=message)
                 else:
-                    await message.channel.send(text, file=image_file, reference=message)
+                    await message.channel.send(text, file=image_file,
+                                               reference=message)
 
     async def on_reaction_add(self, reaction, user):
         message = reaction.message
@@ -53,24 +53,35 @@ class BotBot(commands.Bot):
             galleryID = 1054031330624671784
             channel = self.get_channel(galleryID)
 
-            referenced_message = await message.channel.fetch_message(message.reference.message_id)
+            referenced_message = await message.channel.fetch_message(
+                message.reference.message_id)
             file = await message.attachments[0].to_file()
-            await channel.send(referenced_message.author.name + ": " + referenced_message.content, file=file)
+            await channel.send(referenced_message.author.name + ": " +
+                               referenced_message.content, file=file)
 
     async def on_message(self, message):
         if '(╯°□°)╯︵ ┻━┻' in message.content:
             await message.channel.send('┬─┬ノ(ಠ_ಠノ)', reference=message)
         await self.process_commands(message)
 
+    async def send_image_request(self, prompt, ctx):
+        response = await ctx.bot.send_OpenAI_image_request(prompt)
+        await ctx.bot.send_img_response(response, ctx.message)
 
+    def extract_prompt(self, ctx):
+        return ctx.message.content[len(ctx.prefix)+
+                                   len(ctx.invoked_with):].strip()
 
     def add_commands(self):
-        @self.command(name='gpt', pass_context=True, help='Sends text after command to chatGPT')
+        @self.command(name='gpt', pass_context=True,
+                      help='Sends text after command to chatGPT')
         async def gpt(ctx):
-            prompt = ctx.message.content[len(ctx.prefix)+len(ctx.invoked_with):].strip()
-            await ctx.bot.gpt_history.append({"role": "user", "content": prompt})
+            prompt = self.extract_prompt(ctx)
+            await ctx.bot.gpt_history.append(
+                {"role": "user", "content": prompt})
             response = await ctx.bot.send_ChatGPT_request(prompt)
-            await ctx.bot.gpt_history.append({"role": "assistant", "content": response})
+            await ctx.bot.gpt_history.append(
+                {"role": "assistant", "content": response})
             text = (response[:1997] + '..') if len(response) > 1999 else response
             try:
                 await ctx.channel.send(text, reference=ctx.message)
@@ -78,21 +89,30 @@ class BotBot(commands.Bot):
                 await ctx.channel.send(f"***Recieved no text in response***")
                 await ctx.bot.send_log_message(e)
 
-        @self.command(name='imagine', pass_context=True, help='Creates a prompt and sends it to dalle')
+        @self.command(name='imagine', pass_context=True,
+                      help='Creates a prompt and sends it to dalle')
         async def imagine(ctx):
-            prompt = "Write a Dall-E prompt so that it creates a " + ctx.message.content[len(ctx.prefix)+len(ctx.invoked_with):].strip()
-            await ctx.bot.gpt_history.append({"role": "user", "content": prompt})
+            prompt = "Write a Dall-E prompt so that it creates a {}".format(
+                self.extract_prompt(ctx))
+            await ctx.bot.gpt_history.append(
+                {"role": "user", "content": prompt})
             presponse = await ctx.bot.send_ChatGPT_request(prompt)
-            await ctx.bot.gpt_history.append({"role": "assistant", "content": presponse})
-            response = ctx.bot.send_OpenAI_image_request(presponse)
+            await ctx.bot.gpt_history.append(
+                {"role": "assistant", "content": presponse})
+            response = await ctx.bot.send_OpenAI_image_request(presponse)
             await ctx.bot.send_img_response(response, ctx.message, presponse)
 
-        @self.command(name='draw', pass_context=True, help="Draws tarot cards.")
+        @self.command(name='draw', pass_context=True, help="Draw tarot cards.")
         async def draw(ctx,
                        num_cards: int = commands.parameter(default=1,
-                                                           description="the number of cards to draw"),
+                                                           description="the " \
+                                                           "number of cards" \
+                                                           "to draw"),
                        deck: str = commands.parameter(default='jodocamoin',
-                                                      description="type of deck: jodocamoin, crowleythoth, riderwaitesmith")):
+                                                      description="type of "\
+                                                      "deck: jodocamoin, " \
+                                                      "crowleythoth, " \
+                                                      "riderwaitesmith")):
             if num_cards is None:
                 num_cards = 1
             else:
@@ -101,35 +121,40 @@ class BotBot(commands.Bot):
             response_text, images = ctx.bot.tarotHandler.draw(num_cards, deck)
             response_text = '\n'.join(response_text)
             files = [discord.File(card_image) for card_image in images]
-            await ctx.channel.send(response_text, reference=ctx.message, files=files)
+            await ctx.channel.send(response_text, reference=ctx.message,
+                                   files=files)
 
-        @self.command(name='img', pass_context=True, help="Sends text after command to DALL-E")
+        @self.command(name='img', pass_context=True,
+                      help="Sends text after command to DALL-E")
         async def img(ctx):
-            prompt = ctx.message.content[len(ctx.prefix)+len(ctx.invoked_with):].strip()
-            response = await ctx.bot.send_OpenAI_image_request(prompt)
-            await ctx.bot.send_img_response(response, ctx.message)
+            await self.send_image_request(self.extract_prompt(ctx), ctx)
 
-        @self.command(name='imgp', pass_context=True, help="like /img, but adds 'highly detailed 4k intricate professional' before prompt")
+        @self.command(name='imgp', pass_context=True,
+                      help="like /img, but adds 'highly detailed 4k " \
+                      "intricate professional' before prompt")
         async def imgp(ctx):
-            prompt = "highly detailed 4k intricate professional " + ctx.message.content[len(ctx.prefix)+len(ctx.invoked_with):].strip()
-            response = await ctx.bot.send_OpenAI_image_request(prompt)
-            await ctx.bot.send_img_response(response, ctx.message)
+            await self.send_image_request(
+                "highly detailed 4k intricate professional " +
+                self.extract_prompt(ctx),
+                ctx)
 
-        @self.command(name='RATI', pass_context=True, help="like /img, but adds 'RATI the rat God. ' before your prompt")
+        @self.command(name='RATI', pass_context=True,
+                      help="like /img, but adds 'RATI the rat God. ' " \
+                      "before your prompt")
         async def RATI(ctx):
-            prompt = "RATI the rat God. " + ctx.message.content[len(ctx.prefix)+len(ctx.invoked_with):].strip()
-            response = await ctx.bot.send_OpenAI_image_request(prompt)
-            await ctx.bot.send_img_response(response, ctx.message)
+            await self.send_image_request("RATI the rat God. " +
+                                          self.extract_prompt(ctx), ctx)
 
-        @self.command(name='LEGO', pass_context=True, help="like /img, but adds 'LEGO. ' before your prompt")
+        @self.command(name='LEGO', pass_context=True,
+                      help="like /img, but adds 'LEGO. ' before your prompt")
         async def LEGO(ctx):
-            prompt = "LEGO. " + ctx.message.content[len(ctx.prefix)+len(ctx.invoked_with):].strip()
-            response = await ctx.bot.send_OpenAI_image_request(prompt)
-            await ctx.bot.send_img_response(response, ctx.message)
+            await self.send_image_request("LEGO. " + self.extract_prompt(ctx),
+                                          ctx)
 
-        @self.command(name='comp', pass_context=True, help='Sends text to gpt3 for completion')
+        @self.command(name='comp', pass_context=True,
+                      help='Sends text to gpt3 for completion')
         async def comp(ctx):
-            prompt = ctx.message.content[len(ctx.prefix)+len(ctx.invoked_with):].strip()
+            prompt = self.extract_prompt(ctx)
             response = await ctx.bot.send_OpenAI_completion_request(prompt)
             text = (response[:1997] + '..') if len(response) > 1999 else response
             try:
@@ -138,9 +163,13 @@ class BotBot(commands.Bot):
                 await ctx.channel.send(f"***Recieved no text in response***")
                 await ctx.bot.send_log_message(e)
 
-        @self.command(name='compSettings', pass_context=True, help='Changes/lists current settings for completion endpoint.  Calling with no arguments resets to default values.')
-        async def compSettings(ctx, model: str = commands.parameter(default="text-davinci-003",
-                                                                    description="the model the completion endpoint is using"),
+        @self.command(name='compSettings', pass_context=True,
+                      help="Changes/lists current settings for completion " \
+                      "endpoint.  Calling with no arguments resets to " \
+                      "default values.")
+        async def compSettings(ctx,
+                               model: str = commands.parameter(default="text-davinci-003",
+                                                               description="the model the completion endpoint is using"),
                                temperature: float = commands.parameter(default=0.7,
                                                                        description="the temperature being sent to completion endpoint"),
                                top_p: float = commands.parameter(default=1,
@@ -160,14 +189,16 @@ class BotBot(commands.Bot):
 
     async def send_ChatGPT_request(self, prompt):
         model = "gpt-3.5-turbo"
-        mess = [{"role": "system", "content": "You are a helpful assistant. You respond in great depth."}]
+        mess = [{"role": "system",
+                 "content": "You are a helpful assistant. You respond in great depth."}]
         async for m in self.gpt_history:
             mess.append(m)
         try:
-            response = await asyncio.wait_for(openai.ChatCompletion.acreate(model=model,
-                                                    messages=mess,
-                                                    temperature=0,
-                                                    ), timeout=10)
+            response = await asyncio.wait_for(openai.ChatCompletion.acreate(
+                model=model,
+                messages=mess,
+                temperature=0,),
+                timeout=20)
             returnval = response['choices'][0]['message']['content']
         except (openai.error.InvalidRequestError, openai.error.APIError) as e:
             returnval = f'***{e}***'
@@ -183,7 +214,7 @@ class BotBot(commands.Bot):
                 prompt=prompt,
                 n=1,
                 size="1024x1024"
-            ), timeout=10)
+            ), timeout=20)
         except (openai.error.InvalidRequestError, openai.error.APIError) as e:
             await self.send_log_message(e)
             response = f'***{e}***'
@@ -197,13 +228,14 @@ class BotBot(commands.Bot):
         await self.send_log_message("Sending completion request {} with the following settings\n{}".format(prompt, settings_string))
         returnval = None
         try:
-            response = await asyncio.wait_for(openai.Completion.acreate(model=self.model,
-                                     prompt=prompt,
-                                     temperature=self.compTemp,
-                                     top_p=self.top_p,
-                                     frequency_penalty=self.freq_penalty,
-                                     presence_penalty=self.pres_penalty,
-                                     max_tokens=256,), timeout=10)
+            response = await asyncio.wait_for(openai.Completion.acreate(
+                model=self.model,
+                prompt=prompt,
+                temperature=self.compTemp,
+                top_p=self.top_p,
+                frequency_penalty=self.freq_penalty,
+                presence_penalty=self.pres_penalty,
+                max_tokens=256,), timeout=20)
             returnval = response['choices'][0]['text']
         except (openai.error.InvalidRequestError, openai.error.APIError) as e:
             await self.send_log_message(e)
