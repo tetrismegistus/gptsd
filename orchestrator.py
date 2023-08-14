@@ -198,7 +198,7 @@ class BotBot(commands.Bot):
                 model=model,
                 messages=mess,
                 temperature=0,),
-                timeout=20)
+                timeout=30)
             returnval = response['choices'][0]['message']['content']
         except (openai.error.InvalidRequestError, openai.error.APIError) as e:
             returnval = f'***{e}***'
@@ -214,13 +214,13 @@ class BotBot(commands.Bot):
                 prompt=prompt,
                 n=1,
                 size="1024x1024"
-            ), timeout=20)
+            ), timeout=30)
         except (openai.error.InvalidRequestError, openai.error.APIError) as e:
             await self.send_log_message(e)
             response = f'***{e}***'
         except asyncio.TimeoutError:
-            returnval = f'***API call timed out***'
-            await self.send_log_message(returnval)
+            response = f'***API call timed out***'
+            await self.send_log_message(response)
         return response
 
     async def send_OpenAI_completion_request(self, prompt):
@@ -235,7 +235,7 @@ class BotBot(commands.Bot):
                 top_p=self.top_p,
                 frequency_penalty=self.freq_penalty,
                 presence_penalty=self.pres_penalty,
-                max_tokens=256,), timeout=20)
+                max_tokens=256,), timeout=30)
             returnval = response['choices'][0]['text']
         except (openai.error.InvalidRequestError, openai.error.APIError) as e:
             await self.send_log_message(e)
